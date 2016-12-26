@@ -1,7 +1,7 @@
 ---
-title: "Principal component capture-recapture analysis of Snow petrel data"
+title: "Supplementary material for 'Dealing with many correlated covariates in capture-recapture models' by Gimenez and Barbraud."
 author: "Olivier Gimenez"
-date: "24 décembre 2016"
+date: "26 décembre 2016"
 output:
   word_document: default
   pdf_document: default
