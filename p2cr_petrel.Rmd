@@ -57,6 +57,11 @@ Percentage of variance explained:
 res.pca$eig[,3]
 ```
 
+The loadings:
+```{r}
+res.pca$var$cor
+```
+
 Re-project each covariate on each principal component:
 ```{r}
 pcs = res.pca$ind$coord
@@ -81,15 +86,12 @@ petrel.ch <- unlist(strsplit(petrel$ch, ""))
 nocc <- nchar(petrel$ch[1])
 petrel.ch <- matrix(as.numeric(petrel.ch), ncol = nocc, byrow = TRUE)
 freq = petrel$freq
-test3sr_petrel = test3sr(petrel.ch, freq)
-test3sm_petrel = test3sm(petrel.ch, freq)
-test2ct_petrel = test2ct(petrel.ch, freq)
-test2cl_petrel = test2cl(petrel.ch, freq)
-# display results:
-test3sr_petrel
-test3sm_petrel
-test2ct_petrel
-test2cl_petrel
+global = overall_CJS(petrel.ch, freq)
+global
+test3sr(petrel.ch, freq)
+test3sm(petrel.ch, freq)
+test2ct(petrel.ch, freq)
+test2cl(petrel.ch, freq)
 ```
 
 It sounds like there is a strong trap-dependence effect. Let's deal with it and create an individual time-varying covariate for trap-dependence (see appendix C of the Gentle introduction to Mark):
@@ -195,7 +197,7 @@ Clearly, there is time variation in the detection process. Now, let's have a loo
 phixpt$results$beta
 ```
 
-Remember, from our preliminary exploration step above, we know that covariates 2 and 3 are highly positively correlated. However by inspecting the estimates here, these covariates seem to have an opposite effect on survival! 
+The covariates are in that order: SIE.Su (x1), SIE.Au (x2), SIE.Wi (x3), SIE.Sp (x4), SOI (x5), T.Su (x6), T.au (x7), T.wi (x8) and T.sp (x9). Remember, from our preliminary exploration step above, we know that covariates 2 and 3 are highly positively correlated. However by inspecting the estimates here, these covariates seem to have an opposite effect on survival! 
 
 ## P2CR analysis
 
@@ -273,6 +275,9 @@ for (i in 1:9){
 }
 # calculate p-value
 pval = 1-pf(stat,df1,df2)
+stat
+df1
+df2
 pval 
 ```
 
@@ -318,6 +323,9 @@ for (i in 1:8){
 }
 
 pval = 1-pf(stat,df1,df2)
+stat
+df1
+df2
 pval 
 ```
 
@@ -361,6 +369,9 @@ for (i in 1:7){
 }
 
 pval = 1-pf(stat,df1,df2)
+stat
+df1
+df2
 pval 
 ```
 
@@ -378,14 +389,15 @@ phipca_mle <- phipc31$results$real[1:29,]
 # Make a 6x6 inch image at 300dpi
 #ppi <- 300
 #png("time_survival_allcov.png", width=6*ppi, height=6*ppi, res=ppi)
-plot(1974:2002,phicov_mle[,1],lwd=3,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='Model with all raw covariates')
+par(mfrow=c(2,1))
+plot(1974:2002,phicov_mle[,1],lwd=2,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='Model with all raw covariates')
 polygon(x=c(1974:2002, rev(1974:2002)),y=c(phicov_mle[,3], rev(phicov_mle[,4])),col='grey90')
-lines(1974:2002,phicov_mle[,1],lwd=3,col='black')
+lines(1974:2002,phicov_mle[,1],lwd=2,col='black')
 #dev.off()
 #png("time_survival_p2cr.png", width=6*ppi, height=6*ppi, res=ppi)
-plot(1974:2002,phipca_mle[,1],lwd=3,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='P2CR model')
+plot(1974:2002,phipca_mle[,1],lwd=2,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='P2CR model')
 polygon(x=c(1974:2002, rev(1974:2002)),y=c(phipca_mle[,3], rev(phipca_mle[,4])),col='grey90')
-lines(1974:2002,phipca_mle[,1],lwd=3,col='black')
+lines(1974:2002,phipca_mle[,1],lwd=2,col='black')
 #dev.off()
 ```
 
