@@ -1,0 +1,463 @@
+---
+title: "Principal component capture-recapture analysis of Snow petrel data"
+author: "Olivier Gimenez"
+date: "24 décembre 2016"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+## Introduction
+
+We illustrate the principal component capture-recapture (P2CR) method for covariates selection in capture-recapture models using data on survival of Snow petrels in Pointe Géologie Archipelago, Terre Adélie, Antarctica. In total, the dataset consists of 604 female histories from 1973 to 2002. The objective is to investigate the effect of climatic conditions on adult survival.
+
+## Explore climatic covariates
+
+First we explore the covariates sea ice extent in summer (SIE.Su), in autumn and winter (SIE.Au and SIE.Wi), in spring (SIE.Sp), annual southern oscillation index (SOI), air temperature in summer (T.Su), in autumn and winter (T.Au and T.Wi) and in spring (T.Sp).
+
+Let us have a look to the correlations between these covariates:
+```{r}
+cov <- read.table('cov-petrel.txt',header=T)
+head(cov)
+round(cor(cov),2)
+```
+
+Visually, with a heatmap:
+```{r}
+library(ggplot2)
+library(reshape2)
+qplot(x=Var1, y=Var2, data=melt(cor(cov)), fill=value, geom="tile")
+```
+
+What are the significant correlations?
+```{r}
+library(psych)
+corr.test(cov)
+print(corr.test(cov),short=FALSE)
+```
+
+Seems like sea ice extent in autumn and winter are positively correlated, while sea ice extent in autumn and temperature in autumn are negatively correlated.
+
+## PCA on covariates
+
+Let's perform a PCA on this set of covariates:
+```{r}
+library(FactoMineR)
+res.pca = PCA(cov,scale.unit=T,graph=T,ncp=9)
+```
+
+Find the covariates associated to each principal component:
+```{r}
+dimdesc(res.pca,axes = 1:9)
+#plot(res.pca)
+```
+
+Percentage of variance explained:
+```{r}
+res.pca$eig[,3]
+```
+
+Re-project each covariate on each principal component:
+```{r}
+pcs = res.pca$ind$coord
+round(pcs,2)
+```
+
+## Model fitting
+
+We're gonna fit various capture-recapture models to the petrel data. We use [RMark](http://www.phidot.org/software/mark/docs/book/pdf/app_3.pdf) because everything can be done in R, and it's cool for reproducible research. But other pieces of software could be used too, like e.g. E-SURGE. 
+
+First, let's read in the data:
+```{r}
+library(RMark)
+petrel=convert.inp("females_petrel")
+#petrel$ch
+```
+
+Before fitting capture-recapture models to the data, we check whether the standard Cormack-Jolly-Seber model is fitting the data well. We use the R package R2ucare. 
+```{r}
+library(R2ucare)
+petrel.ch <- unlist(strsplit(petrel$ch, ""))
+nocc <- nchar(petrel$ch[1])
+petrel.ch <- matrix(as.numeric(petrel.ch), ncol = nocc, byrow = TRUE)
+freq = petrel$freq
+test3sr_petrel = test3sr(petrel.ch, freq)
+test3sm_petrel = test3sm(petrel.ch, freq)
+test2ct_petrel = test2ct(petrel.ch, freq)
+test2cl_petrel = test2cl(petrel.ch, freq)
+# display results:
+test3sr_petrel
+test3sm_petrel
+test2ct_petrel
+test2cl_petrel
+```
+
+It sounds like there is a strong trap-dependence effect. Let's deal with it and create an individual time-varying covariate for trap-dependence (see appendix C of the Gentle introduction to Mark):
+```{r}
+petrel.ch <- unlist(strsplit(petrel$ch, ""))
+nocc <- nchar(petrel$ch[1])
+petrel.td <- matrix(as.numeric(petrel.ch), ncol = nocc, byrow = TRUE)
+petrel.td <- petrel.td[, 1:(nocc - 1)]
+petrel.td <- as.data.frame(petrel.td)
+begin.time <- 1974
+names(petrel.td) <- paste('td', (begin.time + 1):(begin.time + nocc - 1), sep = "")
+#head(petrel.td) # dim 430 x 29
+dim(petrel.td)
+petrel <- cbind(petrel, petrel.td)
+#head(petrel)
+```
+
+Now process the data:
+```{r}
+petrel.processed=process.data(petrel, model="CJS", begin.time=1974)
+```
+
+Create the default design matrix:
+```{r}
+design.p=list(time.varying=c('td')) #td
+design.parameters <- list(p=design.p)
+petrel.ddl <- make.design.data(petrel.processed,parameters=design.parameters)
+```
+
+Standardize the covariates:
+```{r}
+# standardize
+moy = apply(cov,2,mean)
+prec = apply(cov,2,sd)
+moymat = matrix(rep(moy,nrow(cov)),ncol=ncol(cov),byrow=T)
+precmat = matrix(rep(prec,nrow(cov)),ncol=ncol(cov),byrow=T)
+covstar = (cov - moymat)/precmat
+#apply(covstar,2,mean)
+#apply(covstar,2,sd)
+cov = covstar
+```
+
+Add raw covariates to the design matrix:
+```{r}
+petrel.ddl$Phi$x1=0
+petrel.ddl$Phi$x2=0
+petrel.ddl$Phi$x3=0
+petrel.ddl$Phi$x4=0
+petrel.ddl$Phi$x5=0
+petrel.ddl$Phi$x6=0
+petrel.ddl$Phi$x7=0
+petrel.ddl$Phi$x8=0
+petrel.ddl$Phi$x9=0
+ind=1
+for (i in 1974:2002){
+  petrel.ddl$Phi$x1[petrel.ddl$Phi$time==i]=cov[ind,1]
+  petrel.ddl$Phi$x2[petrel.ddl$Phi$time==i]=cov[ind,2]
+  petrel.ddl$Phi$x3[petrel.ddl$Phi$time==i]=cov[ind,3]
+  petrel.ddl$Phi$x4[petrel.ddl$Phi$time==i]=cov[ind,4]
+  petrel.ddl$Phi$x5[petrel.ddl$Phi$time==i]=cov[ind,5]
+  petrel.ddl$Phi$x6[petrel.ddl$Phi$time==i]=cov[ind,6]
+  petrel.ddl$Phi$x7[petrel.ddl$Phi$time==i]=cov[ind,7]
+  petrel.ddl$Phi$x8[petrel.ddl$Phi$time==i]=cov[ind,8]
+  petrel.ddl$Phi$x9[petrel.ddl$Phi$time==i]=cov[ind,9]
+  ind=ind+1
+}
+```
+
+Specify the effects on survival and detection probabilities: 
+```{r}
+#  for survival probabilities
+Phidot=list(formula=~1) # constant
+Phitime=list(formula=~time) # time
+PhiCov=list(formula=~x1+x2+x3+x4+x5+x6+x7+x8+x9) # all covariates
+#  Define range of models for detection probabilities
+pdot=list(formula=~td) # constant, with trap-dependence
+ptime=list(formula=~time+td) # additive effect of time and trap-dependence (no interaction because of severe identifiability issues Gimenez et al. 2003)
+```
+
+Fit models:
+```{r, message=FALSE, warning=FALSE}
+# phi,p
+phip = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phidot,p=pdot),output = FALSE,delete=T)
+# phit,p
+phitp = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phitime,p=pdot),output = FALSE,delete=T)
+# phi,pt
+phipt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phidot,p=ptime),output = FALSE,delete=T)
+# phit,pt
+phitpt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phitime,p=ptime),output = FALSE,delete=T)
+# phi(cov),pt
+phixpt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=PhiCov,p=ptime),output = FALSE,delete=T)
+# phi(cov),p
+phixp = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=PhiCov,p=pdot),output = FALSE,delete=T)
+```
+
+Compare models
+```{r}
+collect.models()
+```
+
+Clearly, there is time variation in the detection process. Now, let's have a look to the estimates of the covariate regression parameters:
+```{r}
+phixpt$results$beta
+```
+
+Remember, from our preliminary exploration step above, we know that covariates 2 and 3 are highly positively correlated. However by inspecting the estimates here, these covariates seem to have an opposite effect on survival! 
+
+## P2CR analysis
+
+In this section, we show how to perform a P2CR analysis. First, we amend the design matrix we built before, and add the coordinates of the raw covariates on the principal components:
+```{r}
+petrel.ddl$Phi$pc1=0
+petrel.ddl$Phi$pc2=0
+petrel.ddl$Phi$pc3=0
+petrel.ddl$Phi$pc4=0
+petrel.ddl$Phi$pc5=0
+petrel.ddl$Phi$pc6=0
+petrel.ddl$Phi$pc7=0
+petrel.ddl$Phi$pc8=0
+petrel.ddl$Phi$pc9=0
+ind=1
+for (i in 1974:2002){
+  petrel.ddl$Phi$pc1[petrel.ddl$Phi$time==i]=pcs[ind,1]
+  petrel.ddl$Phi$pc2[petrel.ddl$Phi$time==i]=pcs[ind,2]
+  petrel.ddl$Phi$pc3[petrel.ddl$Phi$time==i]=pcs[ind,3]
+  petrel.ddl$Phi$pc4[petrel.ddl$Phi$time==i]=pcs[ind,4]
+  petrel.ddl$Phi$pc5[petrel.ddl$Phi$time==i]=pcs[ind,5]
+  petrel.ddl$Phi$pc6[petrel.ddl$Phi$time==i]=pcs[ind,6]
+  petrel.ddl$Phi$pc7[petrel.ddl$Phi$time==i]=pcs[ind,7]
+  petrel.ddl$Phi$pc8[petrel.ddl$Phi$time==i]=pcs[ind,8]
+  petrel.ddl$Phi$pc9[petrel.ddl$Phi$time==i]=pcs[ind,9]
+  ind=ind+1
+}
+```
+
+In the first step of the P2CR analysis, we consider each PC separately:
+```{r}
+Phipc1=list(formula=~pc1)
+Phipc2=list(formula=~pc2)
+Phipc3=list(formula=~pc3)
+Phipc4=list(formula=~pc4)
+Phipc5=list(formula=~pc5)
+Phipc6=list(formula=~pc6)
+Phipc7=list(formula=~pc7)
+Phipc8=list(formula=~pc8)
+Phipc9=list(formula=~pc9)
+phipc1 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc1,p=ptime),output = FALSE,delete=T)
+phipc2 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc2,p=ptime),output = FALSE,delete=T)
+phipc3 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc3,p=ptime),output = FALSE,delete=T)
+phipc4 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc4,p=ptime),output = FALSE,delete=T)
+phipc5 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc5,p=ptime),output = FALSE,delete=T)
+phipc6 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc6,p=ptime),output = FALSE,delete=T)
+phipc7 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc7,p=ptime),output = FALSE,delete=T)
+phipc8 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc8,p=ptime),output = FALSE,delete=T)
+phipc9 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc9,p=ptime),output = FALSE,delete=T)
+```
+
+We now use ANODEV to to test the significance of these PCs:
+```{r}
+# get info on model with time-dependent survival
+devtime = phitpt$results$lnl
+npartime = phitpt$results$npar
+
+# get info on model with constant survival
+devct = phipt$results$lnl
+nparct = phipt$results$npar
+
+# test each PC:
+stat = rep(NA,9)
+df1 = rep(NA,9)
+df2 = rep(NA,9)
+for (i in 1:9){
+	name = paste('phipc',i,sep="")
+	devco = get(name)$results$lnl
+	nparco = get(name)$results$npar
+	num = (devct - devco)/(nparco-nparct)
+	den = (devco - devtime)/(npartime-nparco)	
+	stat[i] <- num/den
+	df1[i] <- nparco-nparct
+	df2[i] <- npartime-nparco
+}
+# calculate p-value
+pval = 1-pf(stat,df1,df2)
+pval 
+```
+
+We can reject the null hypothesis that PC3 has no effect on survival.
+
+In step 2 of the P2CR, we keep PC3 and test the significance of the other PCs:
+```{r}
+Phipc1=list(formula=~pc1+pc3)
+Phipc2=list(formula=~pc2+pc3)
+Phipc3=list(formula=~pc4+pc3)
+Phipc4=list(formula=~pc5+pc3)
+Phipc5=list(formula=~pc6+pc3)
+Phipc6=list(formula=~pc7+pc3)
+Phipc7=list(formula=~pc8+pc3)
+Phipc8=list(formula=~pc9+pc3)
+phipc11 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc1,p=ptime),output = FALSE,delete=T)
+phipc21 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc2,p=ptime),output = FALSE,delete=T)
+phipc31 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc3,p=ptime),output = FALSE,delete=T)
+phipc41 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc4,p=ptime),output = FALSE,delete=T)
+phipc51 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc5,p=ptime),output = FALSE,delete=T)
+phipc61 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc6,p=ptime),output = FALSE,delete=T)
+phipc71 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc7,p=ptime),output = FALSE,delete=T)
+phipc81 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc8,p=ptime),output = FALSE,delete=T)
+```
+
+```{r}
+stat = rep(NA,8)
+df1 = rep(NA,8)
+df2 = rep(NA,8)
+for (i in 1:8){
+	name = paste('phipc',3,sep="")
+	devct = get(name)$results$lnl
+	nparct = get(name)$results$npar
+	namex = paste('phipc',paste(i,'1',sep=""),sep="")
+	devco = get(namex)$results$lnl
+	nparco = get(namex)$results$npar
+	num = (devct - devco)/(nparco-nparct)
+	den = (devco - devtime)/(npartime-nparco)	
+	stat[i] <- num/den
+	df1[i] <- nparco-nparct
+	df2[i] <- npartime-nparco
+
+}
+
+pval = 1-pf(stat,df1,df2)
+pval 
+```
+
+Now PC4 is significant according the ANODEV (remember that PC3 was removed from the list).
+
+In step 3 of the P2CR analysis, we reiterate the process, that is we test the significance of the other PCs in presence of PC3 and PC4: 
+```{r}
+Phipc1=list(formula=~pc1+pc3+pc4)
+Phipc2=list(formula=~pc2+pc3+pc4)
+Phipc3=list(formula=~pc5+pc3+pc4)
+Phipc4=list(formula=~pc6+pc3+pc4)
+Phipc5=list(formula=~pc7+pc3+pc4)
+Phipc6=list(formula=~pc8+pc3+pc4)
+Phipc7=list(formula=~pc9+pc3+pc4)
+phipc12 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc1,p=ptime),output = FALSE,delete=T)
+phipc22 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc2,p=ptime),output = FALSE,delete=T)
+phipc32 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc3,p=ptime),output = FALSE,delete=T)
+phipc42 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc4,p=ptime),output = FALSE,delete=T)
+phipc52 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc5,p=ptime),output = FALSE,delete=T)
+phipc62 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc6,p=ptime),output = FALSE,delete=T)
+phipc72 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phipc7,p=ptime),output = FALSE,delete=T)
+```
+What does the ANODEV tell us?
+```{r}
+stat = rep(NA,7)
+df1 = rep(NA,7)
+df2 = rep(NA,7)
+for (i in 1:7){
+	name = paste('phipc',31,sep="")
+	devct = get(name)$results$lnl
+	nparct = get(name)$results$npar
+	namex = paste('phipc',paste(i,'2',sep=""),sep="")
+	devco = get(namex)$results$lnl
+	nparco = get(namex)$results$npar
+	num = (devct - devco)/(nparco-nparct)
+	den = (devco - devtime)/(npartime-nparco)	
+	stat[i] <- num/den
+	df1[i] <- nparco-nparct
+	df2[i] <- npartime-nparco
+
+}
+
+pval = 1-pf(stat,df1,df2)
+pval 
+```
+
+No more significant PC, the algorithm stops here.
+
+## Post-process results
+
+We will make two plots, one with time-varying survival estimates, and another oneto illustrate the relationship between survival and the selected PCs.
+
+First, a figure displaying the time variation in survival according to a model with all raw covariates and the PC2R model:
+```{r}
+#phit_mle <- phitpt$results$real[1:29,]
+phicov_mle <- phixpt$results$real[1:29,]
+phipca_mle <- phipc31$results$real[1:29,]
+# Make a 6x6 inch image at 300dpi
+#ppi <- 300
+#png("time_survival_allcov.png", width=6*ppi, height=6*ppi, res=ppi)
+plot(1974:2002,phicov_mle[,1],lwd=3,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='Model with all raw covariates')
+polygon(x=c(1974:2002, rev(1974:2002)),y=c(phicov_mle[,3], rev(phicov_mle[,4])),col='grey90')
+lines(1974:2002,phicov_mle[,1],lwd=3,col='black')
+#dev.off()
+#png("time_survival_p2cr.png", width=6*ppi, height=6*ppi, res=ppi)
+plot(1974:2002,phipca_mle[,1],lwd=3,col='black',type='n',ylim=c(0.7,1),xlab='years',ylab='estimated survival',main='P2CR model')
+polygon(x=c(1974:2002, rev(1974:2002)),y=c(phipca_mle[,3], rev(phipca_mle[,4])),col='grey90')
+lines(1974:2002,phipca_mle[,1],lwd=3,col='black')
+#dev.off()
+```
+
+Second, a figure displaying the relationship between survival and the PCs selected by the P2CR analysis.
+
+Get the coefficient estimates for each PC and the intercept:
+```{r}
+phipc31$results$beta[1:3,]
+```
+
+Get confidence intervals using the delta-method:
+```{r}
+library(msm)
+PC3 = pcs[,3]
+PC4 = pcs[,4]
+phi_SE3 = matrix(0, nrow = 29, ncol = 1)
+estmean3 <- c(2.9065503,0.4987728)
+estvar3 <- diag(c(0.0930351,0.1117004)^2)
+phi_SE4 = matrix(0, nrow = 29, ncol = 1)
+estmean4 <- c(2.9065503,-0.3179579)
+estvar4 <- diag(c(0.0930351,0.0937603)^2)
+for (i in 1:29){
+	temp3 <- PC3[i]
+	temp4 <- PC4[i]
+	phi_SE3[i,] <- deltamethod(~ x1+x2*temp3, estmean3, estvar3)
+	phi_SE4[i,] <- deltamethod(~ x1+x2*temp4, estmean4, estvar4)
+}
+
+ilogitphi3 <- estmean3[1] + estmean3[2] * PC3
+ilogitphi3lb <- ilogitphi3 - 1.96 * as.vector(phi_SE3)
+ilogitphi3ub <- ilogitphi3 + 1.96 * as.vector(phi_SE3)
+phi3lb <- 1/(1+exp(-(ilogitphi3lb)))
+phi3ub <- 1/(1+exp(-(ilogitphi3ub)))
+phi3 <- 1/(1+exp(-(ilogitphi3)))
+
+ilogitphi4 <- estmean4[1] + estmean4[2] * PC4
+ilogitphi4lb <- ilogitphi4 - 1.96 * as.vector(phi_SE4)
+ilogitphi4ub <- ilogitphi4 + 1.96 * as.vector(phi_SE4)
+phi4lb <- 1/(1+exp(-(ilogitphi4lb)))
+phi4ub <- 1/(1+exp(-(ilogitphi4ub)))
+phi4 <- 1/(1+exp(-(ilogitphi4)))
+```
+
+Before plotting the survival as a function of the PC values, we need to find out about the raw covariates that were used to build these PCs:
+```{r}
+dimdesc(res.pca,axes = c(3:4))
+```
+High (resp. low) values of PC3 mean high (resp. low) values of SIE in summer and low (resp. high) values of temperature in winter. High (resp. low) values of PC4 mean high (resp. low) values of temperature in spring and low (resp. high) values of SIE in summer. 
+
+Now we can plot the survival - PC relationships, and add the interpretation of the PCs:
+```{r}
+# Make a 6x6 inch image at 300dpi
+#ppi <- 300
+#png("pc3_survival.png", width=6*ppi, height=6*ppi, res=ppi)
+ord<-order(PC3)
+plot(PC3[ord],phi3[ord],lwd=3,col='black',type='n',xlab='PC3',ylab='estimated survival',main='',ylim=c(0.8,1))
+polygon(x=c(PC3[ord], rev(PC3[ord])),y=c(phi3lb[ord], rev(phi3ub[ord])),col='grey90')
+lines(PC3[ord],phi3[ord],lwd=3,col='black')
+text(-1.2,0.82,expression('' %up% 'Temp. in winter'),cex=1)
+text(-1.2,0.81,expression('' %down% 'SIE in summer'),cex=1)
+text(2.1,0.82,expression('' %up% 'SIE in summer'),cex=1)
+text(2.1,0.81,expression('' %down% 'Temp. in winter'),cex=1)
+ord<-order(PC4)
+#dev.off()
+#png("pc4_survival.png", width=6*ppi, height=6*ppi, res=ppi)
+plot(PC4[ord],phi4[ord],lwd=3,col='black',type='n',xlab='PC4',ylab='estimated survival',main='',ylim=c(0.8,1))
+polygon(x=c(PC4[ord], rev(PC4[ord])),y=c(phi4lb[ord], rev(phi4ub[ord])),col='grey90')
+lines(PC4[ord],phi4[ord],lwd=3,col='black')
+text(-1.5,0.82,expression('' %up% 'SIE in summer'),cex=1)
+text(-1.5,0.81,expression('' %down% 'Temp. in spring'),cex=1)
+text(1.7,0.82,expression('' %up% 'Temp. in spring'),cex=1)
+text(1.7,0.81,expression('' %down% 'SIE in summer'),cex=1)
+#dev.off()
+```
+
