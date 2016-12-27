@@ -72,30 +72,24 @@ round(pcs,2)
 
 We're gonna fit various capture-recapture models to the petrel data. We use [RMark](http://www.phidot.org/software/mark/docs/book/pdf/app_3.pdf) because everything can be done in R, and it's cool for reproducible research. But other pieces of software could be used too, like e.g. E-SURGE. 
 
-First, let's read in the data:
-```{r}
-library(RMark)
-petrel=convert.inp("females_petrel")
-#petrel$ch
-```
-
 Before fitting capture-recapture models to the data, we check whether the standard Cormack-Jolly-Seber model is fitting the data well. We use the R package R2ucare. 
 ```{r}
 library(R2ucare)
-petrel.ch <- unlist(strsplit(petrel$ch, ""))
-nocc <- nchar(petrel$ch[1])
-petrel.ch <- matrix(as.numeric(petrel.ch), ncol = nocc, byrow = TRUE)
-freq = petrel$freq
-global = overall_CJS(petrel.ch, freq)
-global
+geese = read_inp("females_petrel.inp")
+petrel.ch = geese$encounter_histories
+freq = geese$sample_size
 test3sr(petrel.ch, freq)
 test3sm(petrel.ch, freq)
 test2ct(petrel.ch, freq)
 test2cl(petrel.ch, freq)
+overall_CJS(petrel.ch, freq)
 ```
 
 It sounds like there is a strong trap-dependence effect. Let's deal with it and create an individual time-varying covariate for trap-dependence (see appendix C of the Gentle introduction to Mark):
 ```{r}
+# let's read in the data:
+library(RMark)
+petrel=convert.inp("females_petrel")
 petrel.ch <- unlist(strsplit(petrel$ch, ""))
 nocc <- nchar(petrel$ch[1])
 petrel.td <- matrix(as.numeric(petrel.ch), ncol = nocc, byrow = TRUE)
@@ -181,10 +175,6 @@ phitp = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phitime,p=pdo
 phipt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phidot,p=ptime),output = FALSE,delete=T)
 # phit,pt
 phitpt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phitime,p=ptime),output = FALSE,delete=T)
-# phi(cov),pt
-phixpt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=PhiCov,p=ptime),output = FALSE,delete=T)
-# phi(cov),p
-phixp = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=PhiCov,p=pdot),output = FALSE,delete=T)
 ```
 
 Compare models
@@ -192,7 +182,14 @@ Compare models
 collect.models()
 ```
 
-Clearly, there is time variation in the detection process. Now, let's have a look to the estimates of the covariate regression parameters:
+Clearly, there is time variation in the detection process. Also, it's worth investigating further time variation in survival.
+
+Now, let's fit a model with all covariates:
+```{r}
+phixpt = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=PhiCov,p=ptime),output = FALSE,delete=T)
+```
+
+And have a look to the parameter estimates:
 ```{r}
 phixpt$results$beta
 ```
@@ -407,6 +404,48 @@ Get the coefficient estimates for each PC and the intercept:
 ```{r}
 phipc31$results$beta[1:3,]
 ```
+
+Get estimates of recapture probabilities:
+```{r}
+# recapture given no recapture before
+lp1=phipc31$results$beta$estimate[4] + phipc31$results$beta$estimate[5:32]
+p1 = 1/(1+exp(-lp1))
+p1
+# recapture given recapture before
+lp2=phipc31$results$beta$estimate[4]+phipc31$results$beta$estimate[5:32]+phipc31$results$beta$estimate[33]
+p2 = 1/(1+exp(-lp2))
+p2
+# get min/max for p1 with SEs
+ind.min = which.min(p1) # index min p1
+ind.max = which.max(p1) # index max p1
+varlp1 = phipc31$results$beta$se[4]^2 + phipc31$results$beta$se[5:32]^2 # var of p1 on logit scale
+lp1mi = lp1[ind.min]
+varlp1mi = varlp1[ind.min]
+library(msm)
+sep1mi = deltamethod(~ 1/(1+exp(-x1)), lp1mi, varlp1mi)
+min(p1)
+sep1mi
+lp1ma = lp1[ind.max]
+varlp1ma = varlp1[ind.max]
+sep1ma = deltamethod(~ 1/(1+exp(-x1)), lp1ma, varlp1ma)
+max(p1)
+sep1ma
+# get min/max for p2 with SEs
+ind.min = which.min(p2) # index min p2
+ind.max = which.max(p2) # index max p2
+varlp2 = phipc31$results$beta$se[4]^2 + phipc31$results$beta$se[5:32]^2 + phipc31$results$beta$estimate[33]^2# var of p2 on logit scale
+lp2mi = lp2[ind.min]
+varlp2mi = varlp2[ind.min]
+sep2mi = deltamethod(~ 1/(1+exp(-x1)), lp2mi, varlp2mi)
+min(p2)
+sep2mi
+lp2ma = lp2[ind.max]
+varlp2ma = varlp2[ind.max]
+sep2ma = deltamethod(~ 1/(1+exp(-x1)), lp2ma, varlp2ma)
+max(p2)
+sep2ma
+```
+
 
 Get confidence intervals using the delta-method:
 ```{r}
