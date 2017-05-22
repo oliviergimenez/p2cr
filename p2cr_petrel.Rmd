@@ -196,6 +196,114 @@ phixpt$results$beta
 
 The covariates are in that order: SIE.Su (x1), SIE.Au (x2), SIE.Wi (x3), SIE.Sp (x4), SOI (x5), T.Su (x6), T.au (x7), T.wi (x8) and T.sp (x9). Remember, from our preliminary exploration step above, we know that covariates 2 and 3 are highly positively correlated. However by inspecting the estimates here, these covariates seem to have an opposite effect on survival! 
 
+## Standard forward stepwise covariate selection approach
+
+Following a referee's suggestion, we perform here a forward covariate selection. Bearing in mind that we found strong 
+correlation among covariates (see above), we do not recommend performing this analysis without first dealing with the multicollinearity issue. 
+
+In the first step of the analysis, we consider each covariate separately:
+```{r}
+Phix1=list(formula=~x1)
+Phix2=list(formula=~x2)
+Phix3=list(formula=~x3)
+Phix4=list(formula=~x4)
+Phix5=list(formula=~x5)
+Phix6=list(formula=~x6)
+Phix7=list(formula=~x7)
+Phix8=list(formula=~x8)
+Phix9=list(formula=~x9)
+phix1 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix1,p=ptime),output = FALSE,delete=T)
+phix2 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix2,p=ptime),output = FALSE,delete=T)
+phix3 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix3,p=ptime),output = FALSE,delete=T)
+phix4 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix4,p=ptime),output = FALSE,delete=T)
+phix5 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix5,p=ptime),output = FALSE,delete=T)
+phix6 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix6,p=ptime),output = FALSE,delete=T)
+phix7 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix7,p=ptime),output = FALSE,delete=T)
+phix8 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix8,p=ptime),output = FALSE,delete=T)
+phix9 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix9,p=ptime),output = FALSE,delete=T)
+```
+We now use ANODEV to test the significance of these covariates:
+```{r}
+# get info on model with time-dependent survival
+devtime = phitpt$results$lnl
+npartime = phitpt$results$npar
+
+# get info on model with constant survival
+devct = phipt$results$lnl
+nparct = phipt$results$npar
+
+# test each covariate:
+stat = rep(NA,9)
+df1 = rep(NA,9)
+df2 = rep(NA,9)
+for (i in 1:9){
+	name = paste('phix',i,sep="")
+	devco = get(name)$results$lnl
+	nparco = get(name)$results$npar
+	num = (devct - devco)/(nparco-nparct)
+	den = (devco - devtime)/(npartime-nparco)	
+	stat[i] <- num/den
+	df1[i] <- nparco-nparct
+	df2[i] <- npartime-nparco
+}
+# calculate p-value
+pval = 1-pf(stat,df1,df2)
+stat
+df1
+df2
+pval 
+```
+
+It seems like SOI ($x_5$) and temperature in winter ($x_8$) have a significant effect. 
+In step 2 of the analysis, we keep these two covariates and test the significance of the other covariates:
+```{r}
+Phix0=list(formula=~x5+x8) # constant model in the current ANODEV
+Phix1=list(formula=~x5+x8+x1)
+Phix2=list(formula=~x5+x8+x2)
+Phix3=list(formula=~x5+x8+x3)
+Phix4=list(formula=~x5+x8+x4)
+Phix5=list(formula=~x5+x8+x6)
+Phix6=list(formula=~x5+x8+x7)
+Phix7=list(formula=~x5+x8+x9)
+phix58 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix1,p=ptime),output = FALSE,delete=T)
+phix581 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix1,p=ptime),output = FALSE,delete=T)
+phix582 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix2,p=ptime),output = FALSE,delete=T)
+phix583 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix3,p=ptime),output = FALSE,delete=T)
+phix584 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix4,p=ptime),output = FALSE,delete=T)
+phix585 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix5,p=ptime),output = FALSE,delete=T)
+phix586 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix6,p=ptime),output = FALSE,delete=T)
+phix587 = mark(petrel.processed,petrel.ddl,model.parameters=list(Phi=Phix7,p=ptime),output = FALSE,delete=T)
+```
+
+Then, we perform ANODEV tests to assess the significance of the remaining covariates in presence of both $x_5$ and $x_8$.
+```{r}
+stat = rep(NA,7)
+df1 = rep(NA,7)
+df2 = rep(NA,7)
+for (i in 1:7){
+	name = 'phix58'
+	devct = get(name)$results$lnl
+	nparct = get(name)$results$npar
+	namex = paste('phix58',i,sep="")
+	devco = get(namex)$results$lnl
+	nparco = get(namex)$results$npar
+	df1[i] <- 1 # we add a single covariate
+	df2[i] <- npartime-nparco
+	num = (devct - devco)/df1[i]
+	den = (devco - devtime)/df2[i]	
+	if (devct == devco) stat[i] <- 0 # it happens for covariate x1
+  if (devct != devco) stat[i] <- num/den
+}
+
+pval = 1-pf(stat,df1,df2)
+stat
+df1
+df2
+pval 
+```
+
+There is no more significant covariates.
+
 ## P2CR analysis
 
 In this section, we show how to perform a P2CR analysis. First, we amend the design matrix we built before, and add the coordinates of the raw covariates on the principal components:
